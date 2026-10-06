@@ -1,0 +1,9 @@
+frames*/
+frames_*/
+__pycache__/
+*.pyc
+prev_*.png
+v2_*.png
+preview.png
+render*log*.txt
+*.blend1

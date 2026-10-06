@@ -13,6 +13,7 @@
 | 02 | 等轴 2.5D Isometric | ![等轴2.5D](02-isometric-2.5d/preview.gif) | Blender 无头 EEVEE + 正交等轴相机 + 波前调度动画 | [README](02-isometric-2.5d/README.md) |
 | 03 | 扁平矢量 Flat Vector | ![扁平矢量](03-flat-vector/preview.gif) | 缓动函数库 + 动画十二法则（回弹/挤压拉伸/预备动作） | [README](03-flat-vector/README.md) |
 | 04 | 线条动画 Line Art | ![线条动画](04-line-art/preview.gif) | 单路径弧长采样 + 描边进度揭示（SVG stroke-dashoffset 的代码版） | [README](04-line-art/README.md) |
+| 05 | 3D 渲染 3D Render | ![3D渲染](05-3d-render/preview.gif) | Blender 几何节点实例化 8733 颗弹珠 + 数学波场 + EEVEE 无头渲染 | [README](05-3d-render/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -20,7 +21,8 @@
 - [x] 02 等轴 2.5D —— 马林巴瓷砖，24fps 与 60fps 双版本对比
 - [x] 03 扁平矢量 —— 圆点一镜长成太阳，24fps 与 60fps 双版本对比
 - [x] 04 线条动画 —— 一笔画：种子 → 城市 → 圆日
-- [ ] 05 ~ 15 待解锁
+- [x] 05 3D 渲染 —— 柔软着陆：气球字 + 铬球句号 + 8733 颗弹珠的冲击波
+- [ ] 06 ~ 15 待解锁
 
 ## 快速开始
 
@@ -56,6 +58,11 @@ ffmpeg -y -framerate 60 -i frames2/f_%04d.png -c:v libx264 -preset slow -crf 17 
 cd 04-line-art
 python make_lineart.py all
 ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -movflags +faststart output.mp4
+
+# 05 3D 渲染（Blender 无头，帧率可传参）
+cd 05-3d-render
+blender -b -P build_soft.py -- full 60
+ffmpeg -y -framerate 60 -i frames_60/f_%04d.png -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -movflags +faststart output.mp4
 ```
 
 ## 为什么仓库里没有帧序列？

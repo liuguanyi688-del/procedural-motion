@@ -5,7 +5,7 @@
 
 [▶ 最终版·软膜果冻 output.mp4](output.mp4) · [▶ v2 刚体颗粒 output_rigid_granular.mp4](output_rigid_granular.mp4) · [▶ v1 运动学波 output_kinematic_wave.mp4](output_kinematic_wave.mp4)
 
-脚本：[build_soft.py](build_soft.py)（最终版）· build_soft_gn.py（v1，git 历史中）
+脚本：[build_soft.py](build_soft.py)（最终版）· [build_soft_v2_rigid.py](build_soft_v2_rigid.py)（v2 刚体）· build_soft_gn.py（v1）
 
 ## 三版演进：什么才是"对的物理"
 

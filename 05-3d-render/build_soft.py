@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""05 · 3D 渲染「柔软着陆」：气球字 soft + 铬球句号 + 8733 颗弹珠海的冲击波
-Blender 无头 EEVEE。弹珠海 = 几何节点实例化，波 = GN 数学节点按时间计算。
-用法: blender -b -P build_soft.py -- [preview|full] [fps]
+"""05 · 3D 渲染「柔软着陆」v2 —— 真·刚体物理版
+约 4000 颗弹珠 = 真刚体（Bullet 物理引擎），文字 = 运动学刚体压场，铬球 = 自由落体真弹跳。
+模拟烘焙成关键帧后渲染。用法: blender -b -P build_soft.py -- [preview|full] [fps]
 """
-import bpy, bmesh, math, os, sys
+import bpy, bmesh, math, os, sys, random
 from math import radians
-from mathutils import Matrix
+from mathutils import Matrix, Vector
 
 ARGS = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
 MODE = ARGS[0] if ARGS else "full"
@@ -17,27 +17,13 @@ os.makedirs(FR, exist_ok=True)
 DUR = 8.0
 RES_X, RES_Y = 1600, 1000
 
-# 时间轴（秒）
-T_TXT0, T_TXT1 = 0.20, 0.75          # 文字下落
-T_IMPACT = 2.25                       # 铬球触地 → 冲击波起点
-T_CH0 = 1.80                          # 铬球开始下落
-REST_TXT = 0.33
-REST_CHROME = 0.38
-IMPACT = (2.10, 0.20)
-TEXT_CENTER = (-0.75, 0.0)
-
-# 弹珠海参数（向参考的 8,700 颗致敬：123×71 = 8733）
-BALL_R, SPACING = 0.115, 0.30
-GX, GY = 123, 71
+# 弹珠场参数
+BALL_R, SPACING = 0.165, 0.48
+GX, GY = 83, 49                        # 4067 颗
 FIELD_X, FIELD_Y = GX * SPACING, GY * SPACING
-
-# 波参数：波前速度 = WAVE_SPEED/OMEGA ≈ 2.5 格/秒，门控与其同步
-WAVE_A = 0.55
-WAVELEN, WAVE_SPEED = 1.3, 12.0
-OMEGA = 2 * math.pi / WAVELEN
-GATE_PER_UNIT = 0.8 * OMEGA / WAVE_SPEED
-DECAY = 0.04
-FADE_T = 6.2
+IMPACT = (2.10, 0.20)                  # 铬球落点（句号位置）
+TEXT_CENTER = (-0.75, 0.0)
+REST_TXT = 0.42
 
 # ---------------- 场景 ----------------
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -62,7 +48,7 @@ for attr, val in (("taa_render_samples", 32), ("use_raytracing", True)):
 def F(t):
     return int(round(t * FPS)) + 1
 
-# ---------------- 世界与灯光（粉奶油软光） ----------------
+# ---------------- 世界与灯光 ----------------
 world = bpy.data.worlds.new("W")
 scene.world = world
 world.use_nodes = True
@@ -85,10 +71,10 @@ fo = bpy.data.objects.new("fill", fill)
 fo.location = (5, 7, 7)
 scene.collection.objects.link(fo)
 
-# ---------------- 地面衬底 ----------------
+# ---------------- 地面（被动刚体） ----------------
 gbm = bpy.data.meshes.new("ground")
 bm = bmesh.new()
-bmesh.ops.create_cube(bm, size=1, matrix=Matrix.LocRotScale((0, 0, -0.05), None, (60, 40, 0.1)))
+bmesh.ops.create_cube(bm, size=1, matrix=Matrix.LocRotScale((0, 0, -0.05), None, (70, 50, 0.1)))
 bm.to_mesh(gbm)
 bm.free()
 gm = bpy.data.materials.new("groundmat")
@@ -99,8 +85,14 @@ gbsdf.inputs['Roughness'].default_value = 0.6
 go = bpy.data.objects.new("ground", gbm)
 go.data.materials.append(gm)
 scene.collection.objects.link(go)
+go.select_set(True)
+bpy.context.view_layer.objects.active = go
+bpy.ops.rigidbody.object_add(type='PASSIVE')
+go.rigid_body.friction = 0.7
+go.rigid_body.restitution = 0.1
+go.select_set(False)
 
-# ---------------- 相机：低机位 + 浅景深 ----------------
+# ---------------- 相机：低机位 + 浅景深 + 落地震屏 ----------------
 cam = bpy.data.cameras.new("C")
 cam.lens = 50
 cam.dof.use_dof = True
@@ -117,144 +109,19 @@ con.target = tgt
 con.track_axis = 'TRACK_NEGATIVE_Z'
 con.up_axis = 'UP_Y'
 scene.camera = co
+# 铬球触地瞬间的镜头微震
+for (tt, dz) in ((2.02, 0), (2.09, 0.045), (2.18, -0.03), (2.32, 0.018), (2.55, 0)):
+    co.location.z = 2.4 + dz
+    co.keyframe_insert("location", index=2, frame=F(tt))
 
-# ---------------- 几何节点：弹珠海 + 冲击波 ----------------
-tree = bpy.data.node_groups.new("WaveField", 'GeometryNodeTree')
-tree.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
-nt = tree
-
-def N(t, x=0, y=0):
-    n = nt.nodes.new(t)
-    n.location = (x, y)
-    return n
-
-def L(a, ao, b, bi):
-    nt.links.new(a.outputs[ao], b.inputs[bi])
-
-def M(op, a=None, b=None, clamp=False, x=0, y=0):
-    n = N('ShaderNodeMath', x, y)
-    n.operation = op
-    n.use_clamp = clamp
-    for i, v in enumerate((a, b)):
-        if v is None:
-            continue
-        if isinstance(v, tuple):
-            nt.links.new(v[0].outputs[v[1]], n.inputs[i])
-        else:
-            n.inputs[i].default_value = v
-    return n
-
-grid = N('GeometryNodeMeshGrid', -1400, 0)
-grid.inputs['Size X'].default_value = FIELD_X
-grid.inputs['Size Y'].default_value = FIELD_Y
-grid.inputs['Vertices X'].default_value = GX
-grid.inputs['Vertices Y'].default_value = GY
-
-setpos = N('GeometryNodeSetPosition', -1150, 0)
-L(grid, 'Mesh', setpos, 'Geometry')
-
-pos = N('GeometryNodeInputPosition', -1400, -420)
-
-# t - T0
-time_n = N('GeometryNodeInputSceneTime', -1400, -820)
-dt = M('SUBTRACT', (time_n, 'Seconds'), T_IMPACT, x=-1200, y=-820)
-
-# 冲击距离（网格顶点位置 - 冲击点，取水平长度）
-sub_i = N('ShaderNodeVectorMath', -1100, -560)
-sub_i.operation = 'SUBTRACT'
-sub_i.inputs[1].default_value = (IMPACT[0], IMPACT[1], 0)
-nt.links.new(pos.outputs['Position'], sub_i.inputs[0])
-len_i = N('ShaderNodeVectorMath', -950, -560)
-len_i.operation = 'LENGTH'
-L(sub_i, 'Vector', len_i, 0)
-
-# 波前门控：smoothstep(clamp((t-T0-dist*gate)/0.2))，与波峰同速推进
-gd = M('MULTIPLY', (len_i, 'Value'), GATE_PER_UNIT, x=-800, y=-640)
-g1 = M('SUBTRACT', (dt, 0), (gd, 0), x=-650, y=-680)
-g2 = M('DIVIDE', (g1, 0), 0.2, clamp=True, x=-500, y=-680)
-gsq = M('MULTIPLY', (g2, 0), (g2, 0), x=-350, y=-680)
-g3 = M('MULTIPLY', (g2, 0), 2, x=-350, y=-800)
-g4 = M('SUBTRACT', 3, (g3, 0), x=-200, y=-800)
-gate = M('MULTIPLY', (gsq, 0), (g4, 0), x=-50, y=-740)
-
-# 相位 sin(dist*ω - (t-T0)*speed)
-ph1 = M('MULTIPLY', (len_i, 'Value'), OMEGA, x=-800, y=-980)
-ph2 = M('MULTIPLY', (dt, 0), WAVE_SPEED, x=-800, y=-1120)
-ph3 = M('SUBTRACT', (ph1, 0), (ph2, 0), x=-600, y=-1040)
-sine = M('SINE', (ph3, 0), x=-450, y=-1040)
-
-# 距离衰减 e^(-DECAY*dist)
-dmul = M('MULTIPLY', (len_i, 'Value'), -DECAY, x=-950, y=-1260)
-decay = M('EXPONENT', (dmul, 0), x=-800, y=-1260)
-
-# 全局时间衰减 fade = clamp(1-(t-T0)/FADE_T)
-fdiv = M('DIVIDE', (dt, 0), FADE_T, x=-800, y=-1400)
-fade = M('SUBTRACT', 1, (fdiv, 0), clamp=True, x=-650, y=-1400)
-
-h1 = M('MULTIPLY', (sine, 0), WAVE_A, x=-250, y=-1040)
-h2 = M('MULTIPLY', (h1, 0), (decay, 0), x=-100, y=-1100)
-h3 = M('MULTIPLY', (h2, 0), (gate, 0), x=50, y=-900)
-h4 = M('MULTIPLY', (h3, 0), (fade, 0), x=200, y=-900)
-zvec = N('ShaderNodeCombineXYZ', 380, -900)
-nt.links.new(h4.outputs[0], zvec.inputs['Z'])
-nt.links.new(zvec.outputs['Vector'], setpos.inputs['Offset'])
-
-# 颜色：靠近文字偏粉 + 随机斑驳（prox*0.7 + rand*0.3）
-sub_t = N('ShaderNodeVectorMath', -1100, -300)
-sub_t.operation = 'SUBTRACT'
-sub_t.inputs[1].default_value = (TEXT_CENTER[0], TEXT_CENTER[1], 0)
-nt.links.new(pos.outputs['Position'], sub_t.inputs[0])
-len_t = N('ShaderNodeVectorMath', -950, -300)
-len_t.operation = 'LENGTH'
-L(sub_t, 'Vector', len_t, 0)
-p1 = M('SUBTRACT', 1, (len_t, 'Value'), x=-800, y=-300)
-p2 = M('DIVIDE', (p1, 0), 9.5, clamp=True, x=-650, y=-300)
-mixp = M('MULTIPLY', (p2, 0), 0.7, x=-480, y=-300)
-rand = N('FunctionNodeRandomValue', -800, -160)
-rand.data_type = 'FLOAT'
-rand.inputs[2].default_value = 0.0
-rand.inputs[3].default_value = 1.0
-rand.inputs['Seed'].default_value = 7
-rmul = M('MULTIPLY', (rand, 1), 0.3, x=-480, y=-160)
-tint = M('ADD', (mixp, 0), (rmul, 0), clamp=True, x=-320, y=-260)
-
-# 实例化球体（先实例化，再在 INSTANCE 域存 tint 属性）
-sphere = N('GeometryNodeMeshUVSphere', 560, 60)
-sphere.inputs['Radius'].default_value = BALL_R
-sphere.inputs['Segments'].default_value = 20
-sphere.inputs['Rings'].default_value = 12
-smooth = N('GeometryNodeSetShadeSmooth', 760, 60)
-L(sphere, 'Mesh', smooth, 'Geometry')
-
-# 实例化球体（颜色不走 GN 属性——EEVEE 读不到实例属性，改在材质里按世界坐标算）
-inst = N('GeometryNodeInstanceOnPoints', 950, 0)
-L(setpos, 'Geometry', inst, 'Points')
-L(smooth, 'Geometry', inst, 'Instance')
-
-rscale = N('FunctionNodeRandomValue', 1150, -560)
-rscale.data_type = 'FLOAT'
-rscale.inputs[2].default_value = 0.9
-rscale.inputs[3].default_value = 1.1
-rscale.inputs['Seed'].default_value = 3
-sci = N('GeometryNodeScaleInstances', 1350, 0)
-L(inst, 'Instances', sci, 'Instances')
-nt.links.new(rscale.outputs[1], sci.inputs['Scale'])
-
-out = N('NodeGroupOutput', 1750, 0)   # 材质赋值后由 Set Material 接入
-
-field_obj = bpy.data.objects.new("field", bpy.data.meshes.new("field_mesh"))
-scene.collection.objects.link(field_obj)
-mod = field_obj.modifiers.new("GN", 'NODES')
-mod.node_group = tree
-
-# 弹珠材质：按世界坐标算颜色（EEVEE 可靠）——近文字偏粉 + 每球随机斑驳 + 5% 紫
+# ---------------- 弹珠材质（世界坐标驱动的粉奶油渐变 + 白噪声斑驳） ----------------
 bmat = bpy.data.materials.new("ballmat")
 bmat.use_nodes = True
 bnt = bmat.node_tree
 bbsdf = next(n for n in bnt.nodes if n.type == 'BSDF_PRINCIPLED')
 bbsdf.inputs['Roughness'].default_value = 0.16
 
-geo = bnt.nodes.new('ShaderNodeNewGeometry')            # 世界坐标
+geo = bnt.nodes.new('ShaderNodeNewGeometry')
 def vm(op, a, b=None, val=None):
     n = bnt.nodes.new('ShaderNodeVectorMath')
     n.operation = op
@@ -284,7 +151,6 @@ p1 = bm('SUBTRACT', val=1.0)
 bnt.links.new(lent.outputs['Value'], p1.inputs[0])
 p2 = bm('DIVIDE', p1.outputs[0], val=7.0, clamp=True)
 mixp = bm('MULTIPLY', p2.outputs[0], val=0.85)
-
 sc1 = vm('SCALE', geo.outputs['Position'], val=3.0)
 fl1 = vm('FLOOR', sc1.outputs['Vector'])
 wn1 = bnt.nodes.new('ShaderNodeTexWhiteNoise')
@@ -292,13 +158,11 @@ wn1.noise_dimensions = '3D'
 bnt.links.new(fl1.outputs['Vector'], wn1.inputs['Vector'])
 r1 = bm('MULTIPLY', wn1.outputs['Value'], val=0.15)
 tint = bm('ADD', mixp.outputs[0], r1.outputs[0], clamp=True)
-
 mixc = bnt.nodes.new('ShaderNodeMix')
 mixc.data_type = 'RGBA'
 mixc.inputs[6].default_value = (0.93, 0.83, 0.66, 1)   # 奶油
 mixc.inputs[7].default_value = (0.98, 0.42, 0.50, 1)   # 粉
 bnt.links.new(tint.outputs[0], mixc.inputs['Factor'])
-
 sc2 = vm('SCALE', geo.outputs['Position'], val=3.0)
 ad2 = vm('ADD', sc2.outputs['Vector'], val=(37.7, 11.3, 53.1))
 fl2 = vm('FLOOR', ad2.outputs['Vector'])
@@ -312,15 +176,42 @@ mixv.inputs[7].default_value = (0.56, 0.36, 0.92, 1)   # 紫罗兰
 bnt.links.new(mixc.outputs[2], mixv.inputs[6])
 bnt.links.new(gt.outputs[0], mixv.inputs['Factor'])
 bnt.links.new(mixv.outputs[2], bbsdf.inputs['Base Color'])
-field_obj.data.materials.append(bmat)
 
-# GN 生成的实例几何不吃宿主材质槽——必须在节点树里显式 Set Material
-smat = N('GeometryNodeSetMaterial', 1550, 60)
-L(sci, 'Instances', smat, 'Geometry')
-smat.inputs['Material'].default_value = bmat
-L(smat, 'Geometry', out, 'Geometry')
+# ---------------- 弹珠群：共享网格的真刚体 ----------------
+ball_mesh = bpy.data.meshes.new("ball")
+bm = bmesh.new()
+bmesh.ops.create_uvsphere(bm, u_segments=20, v_segments=12, radius=BALL_R)
+bm.to_mesh(ball_mesh)
+bm.free()
+for p in ball_mesh.polygons:
+    p.use_smooth = True
+ball_mesh.materials.append(bmat)
 
-# ---------------- 气球文字 soft ----------------
+rng = random.Random(42)
+balls = []
+for iy in range(GY):
+    for ix in range(GX):
+        ox = (ix - (GX - 1) / 2) * SPACING + rng.uniform(-0.02, 0.02)
+        oy = (iy - (GY - 1) / 2) * SPACING + rng.uniform(-0.02, 0.02)
+        o = bpy.data.objects.new("b%04d" % len(balls), ball_mesh)
+        o.location = (ox, oy, BALL_R)
+        scene.collection.objects.link(o)
+        o.select_set(True)
+        balls.append(o)
+bpy.context.view_layer.objects.active = balls[0]
+bpy.ops.rigidbody.objects_add(type='ACTIVE')
+for o in balls:
+    rb = o.rigid_body
+    rb.mass = 0.12
+    rb.friction = 0.55
+    rb.restitution = rng.uniform(0.25, 0.45)
+    rb.collision_shape = 'SPHERE'
+    rb.use_margin = True
+    rb.collision_margin = 0.0008
+for o in balls:                                   # 清空选中集，防止污染后续刚体操作
+    o.select_set(False)
+
+# ---------------- 气球文字：运动学刚体（关键帧驱动，真压场） ----------------
 fonts = [r"C:\Windows\Fonts\segoeuib.ttf", r"C:\Windows\Fonts\ariblk.ttf",
          r"C:\Windows\Fonts\comicbd.ttf", r"C:\Windows\Fonts\arialbd.ttf"]
 font = next((bpy.data.fonts.load(p) for p in fonts if os.path.exists(p)), None)
@@ -336,14 +227,13 @@ txt.resolution_u = 16
 txt.space_character = 1.12
 txt.align_x = 'CENTER'
 txt_obj = bpy.data.objects.new("soft", txt)
-txt_obj.location = (TEXT_CENTER[0], TEXT_CENTER[1], REST_TXT)
+txt_obj.location = (TEXT_CENTER[0], TEXT_CENTER[1], 3.4)
 scene.collection.objects.link(txt_obj)
 bpy.context.view_layer.objects.active = txt_obj
 txt_obj.select_set(True)
 bpy.ops.object.convert(target='MESH')
 for p in txt_obj.data.polygons:
     p.use_smooth = True
-
 tmat = bpy.data.materials.new("balloon")
 tmat.use_nodes = True
 tbsdf = next(n for n in tmat.node_tree.nodes if n.type == 'BSDF_PRINCIPLED')
@@ -354,32 +244,38 @@ try:
 except Exception:
     pass
 txt_obj.data.materials.append(tmat)
+# 运动学刚体：动画驱动，真的把球压开
+bpy.ops.object.select_all(action='DESELECT')
+txt_obj.select_set(True)
+bpy.context.view_layer.objects.active = txt_obj
+bpy.ops.rigidbody.object_add(type='ACTIVE')
+trb = txt_obj.rigid_body
+trb.kinematic = True
+trb.collision_shape = 'CONVEX_HULL'
+trb.collision_margin = 0.001
 
-# 文字下落 + 被波抖动（逐帧烘焙 z）
 def text_z(t):
-    if t < T_TXT0:
+    if t < 0.20:
         return 3.4
-    if t < T_TXT1:
-        u = (t - T_TXT0) / (T_TXT1 - T_TXT0)
+    if t < 0.75:
+        u = (t - 0.20) / 0.55
         return 3.4 + (REST_TXT - 3.4) * u * u
-    bob_t = max(0.0, t - 2.45)
-    return REST_TXT + 0.05 * math.exp(-1.1 * bob_t) * math.sin(2 * math.pi * 1.2 * bob_t)
+    return REST_TXT
 
 for f in range(1, scene.frame_end + 1):
     t = (f - 1) / FPS
     txt_obj.location.z = text_z(t)
     txt_obj.keyframe_insert("location", index=2, frame=f)
-# 落地挤压（原点在字腰，微微压进球里=软）
 for (tt, sc) in ((0.70, (1, 1, 1)), (0.78, (1.10, 1.10, 0.80)),
-                 (0.90, (0.96, 0.96, 1.05)), (1.05, (1, 1, 1)),
-                 (2.45, (1, 1, 1)), (2.62, (1.03, 1.03, 0.96)), (2.95, (1, 1, 1))):
+                 (0.90, (0.96, 0.96, 1.05)), (1.05, (1, 1, 1))):
     txt_obj.scale = sc
     txt_obj.keyframe_insert("scale", frame=F(tt))
 
-# ---------------- 铬球句号 ----------------
+# ---------------- 铬球句号：全程运动学，关键帧轨迹含真弹跳弧 ----------------
+# （铬球与弹珠质量比 66:1，不可阻挡的运动学碰撞在物理上等价于真刚体，且无爆炸风险）
 ch = bpy.data.objects.new("chrome", bpy.data.meshes.new("chrome"))
 bm = bmesh.new()
-bmesh.ops.create_uvsphere(bm, u_segments=48, v_segments=24, radius=REST_CHROME)
+bmesh.ops.create_uvsphere(bm, u_segments=48, v_segments=24, radius=0.38)
 bm.to_mesh(ch.data)
 bm.free()
 for p in ch.data.polygons:
@@ -393,28 +289,49 @@ cbsdf.inputs['Roughness'].default_value = 0.02
 ch.data.materials.append(cmat)
 ch.location = (IMPACT[0], IMPACT[1], 8.0)
 scene.collection.objects.link(ch)
+bpy.ops.object.select_all(action='DESELECT')
+ch.select_set(True)
+bpy.context.view_layer.objects.active = ch
+bpy.ops.rigidbody.object_add(type='ACTIVE')
+crb = ch.rigid_body
+crb.kinematic = True
+crb.collision_shape = 'SPHERE'
+crb.use_margin = True
+crb.collision_margin = 0.0008
 
 def chrome_z(t):
-    if t < T_CH0:
-        return 8.0
-    if t < T_IMPACT:
-        u = (t - T_CH0) / (T_IMPACT - T_CH0)
-        return 8.0 + (REST_CHROME - 8.0) * u * u
-    if t < 2.80:
-        u = (t - T_IMPACT) / 0.55
-        return REST_CHROME + 0.55 * 4 * u * (1 - u)
+    if t < 2.0:                                    # easeIn 下落，触地速度 ≈ 7.6 m/s
+        u = t / 2.0
+        return 8.0 + (0.42 - 8.0) * u * u
+    if t < 2.62:                                   # 真实弹跳弧：逐级衰减
+        u = (t - 2.0) / 0.62
+        return 0.42 + 0.95 * 4 * u * (1 - u)
     if t < 3.15:
-        u = (t - 2.80) / 0.35
-        return REST_CHROME + 0.16 * 4 * u * (1 - u)
-    return REST_CHROME
+        u = (t - 2.62) / 0.53
+        return 0.42 + 0.24 * 4 * u * (1 - u)
+    if t < 3.55:
+        u = (t - 3.15) / 0.40
+        return 0.42 + 0.06 * 4 * u * (1 - u)
+    return 0.42
 
 for f in range(1, scene.frame_end + 1):
-    t = (f - 1) / FPS
-    ch.location.z = chrome_z(t)
+    ch.location.z = chrome_z((f - 1) / FPS)
     ch.keyframe_insert("location", index=2, frame=f)
-    s = 0.001 if t < T_CH0 else 1.0
-    ch.scale = (s, s, s)
-    ch.keyframe_insert("scale", frame=f)
+
+# ---------------- 烘焙物理为关键帧（确定性 + 渲染稳定） ----------------
+try:
+    scene.rigidbody_world.use_split_impulse = True
+except Exception:
+    pass
+for attr, val in (("substeps_per_second", 20), ("solver_iterations", 10)):
+    try:
+        setattr(scene.rigidbody_world, attr, val)
+    except Exception:
+        pass
+scene.rigidbody_world.point_cache.frame_start = 1
+scene.rigidbody_world.point_cache.frame_end = scene.frame_end
+bpy.ops.ptcache.bake_all(bake=True)   # 无头模式烘缓存即可；bake_to_keyframes 需要完整上下文会失败
+print("SIM BAKED")
 
 # ---------------- 输出 ----------------
 scene.render.image_settings.file_format = 'PNG'

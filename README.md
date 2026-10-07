@@ -15,6 +15,7 @@
 | 04 | 线条动画 Line Art | ![线条动画](04-line-art/preview.gif) | 单路径弧长采样 + 描边进度揭示（SVG stroke-dashoffset 的代码版） | [README](04-line-art/README.md) |
 | 05 | 3D 渲染 3D Render | ![3D渲染](05-3d-render/preview.gif) | 软膜高度场：解析波+压坑、法线倾斜、果冻压扁、次表面散射 | [README](05-3d-render/README.md) |
 | 06 | 形变动画 Shape Morph | ![形变](06-shape-morph/preview.gif) | 弧长重采样 + 锚点对齐 + 逐点缓动插值（SVG 形状插值） | [README](06-shape-morph/README.md) |
+| 07 | 贴纸风科普 Sticker Explainer | ![贴纸](07-sticker-explainer/preview.gif) | 超大画布 + 相机运镜裁剪 + 贴纸三层结构 | [README](07-sticker-explainer/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -24,6 +25,7 @@
 - [x] 04 线条动画 —— 一笔画：种子 → 城市 → 圆日
 - [x] 05 3D 渲染 —— 柔软着陆：气球字 + 铬球句号 + 软膜果冻球海（附运动学波/刚体颗粒两版对比）
 - [x] 06 形变动画 —— 一滴墨 → 咖啡 → 日落 → 海鸥，四幕形变
+- [x] 07 贴纸风科普 —— 超大画布运镜：一部手机里藏着多少种元素？
 - [ ] 06 ~ 15 待解锁
 
 ## 快速开始

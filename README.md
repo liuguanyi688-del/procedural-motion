@@ -17,6 +17,7 @@
 | 06 | 形变动画 Shape Morph | ![形变](06-shape-morph/preview.gif) | 弧长重采样 + 锚点对齐 + 逐点缓动插值（SVG 形状插值） | [README](06-shape-morph/README.md) |
 | 07 | 贴纸风科普 Sticker Explainer | ![贴纸](07-sticker-explainer/preview.gif) | 超大画布 + 相机运镜裁剪 + 贴纸三层结构 | [README](07-sticker-explainer/README.md) |
 | 08 | 赛博朋克 HUD Cyberpunk FUI | ![HUD](08-cyberpunk-hud/preview.gif) | 辉光 screen 混合 + 参数化线框球 + 确定性噪声数据流 | [README](08-cyberpunk-hud/README.md) |
+| 09 | 拼贴剪贴 Collage Cut-out | ![拼贴](09-collage-cutout/preview.gif) | 零素材程序拼贴 + 半调网点化 + 12fps 逐格步进 | [README](09-collage-cutout/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -28,6 +29,7 @@
 - [x] 06 形变动画 —— 一滴墨 → 咖啡 → 日落 → 海鸥，四幕形变
 - [x] 07 贴纸风科普 —— 超大画布运镜：一部手机里藏着多少种元素？
 - [x] 08 赛博朋克 HUD —— 隼眼-9：开机、搜索、锁定长江口
+- [x] 09 拼贴剪贴 —— 绅士照剪开脑袋，星云蹦出来（12fps 逐格）
 - [ ] 06 ~ 15 待解锁
 
 ## 快速开始

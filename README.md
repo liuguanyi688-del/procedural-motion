@@ -16,6 +16,7 @@
 | 05 | 3D 渲染 3D Render | ![3D渲染](05-3d-render/preview.gif) | 软膜高度场：解析波+压坑、法线倾斜、果冻压扁、次表面散射 | [README](05-3d-render/README.md) |
 | 06 | 形变动画 Shape Morph | ![形变](06-shape-morph/preview.gif) | 弧长重采样 + 锚点对齐 + 逐点缓动插值（SVG 形状插值） | [README](06-shape-morph/README.md) |
 | 07 | 贴纸风科普 Sticker Explainer | ![贴纸](07-sticker-explainer/preview.gif) | 超大画布 + 相机运镜裁剪 + 贴纸三层结构 | [README](07-sticker-explainer/README.md) |
+| 08 | 赛博朋克 HUD Cyberpunk FUI | ![HUD](08-cyberpunk-hud/preview.gif) | 辉光 screen 混合 + 参数化线框球 + 确定性噪声数据流 | [README](08-cyberpunk-hud/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -26,6 +27,7 @@
 - [x] 05 3D 渲染 —— 柔软着陆：气球字 + 铬球句号 + 软膜果冻球海（附运动学波/刚体颗粒两版对比）
 - [x] 06 形变动画 —— 一滴墨 → 咖啡 → 日落 → 海鸥，四幕形变
 - [x] 07 贴纸风科普 —— 超大画布运镜：一部手机里藏着多少种元素？
+- [x] 08 赛博朋克 HUD —— 隼眼-9：开机、搜索、锁定长江口
 - [ ] 06 ~ 15 待解锁
 
 ## 快速开始

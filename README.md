@@ -18,6 +18,7 @@
 | 07 | 贴纸风科普 Sticker Explainer | ![贴纸](07-sticker-explainer/preview.gif) | 超大画布 + 相机运镜裁剪 + 贴纸三层结构 | [README](07-sticker-explainer/README.md) |
 | 08 | 赛博朋克 HUD Cyberpunk FUI | ![HUD](08-cyberpunk-hud/preview.gif) | 辉光 screen 混合 + 参数化线框球 + 确定性噪声数据流 | [README](08-cyberpunk-hud/README.md) |
 | 09 | 拼贴剪贴 Collage Cut-out | ![拼贴](09-collage-cutout/preview.gif) | 零素材程序拼贴 + 半调网点化 + 12fps 逐格步进 | [README](09-collage-cutout/README.md) |
+| 10 | 弥散渐变玻璃拟态 Aurora Glassmorphism | ![极光玻璃](10-aurora-glass/preview.gif) | 各向异性光斑 + fbm 扭曲 + 透视玻璃 SDF 折射 + 液态玻璃色散 + bloom | [README](10-aurora-glass/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -30,7 +31,8 @@
 - [x] 07 贴纸风科普 —— 超大画布运镜：一部手机里藏着多少种元素？
 - [x] 08 赛博朋克 HUD —— 隼眼-9：开机、搜索、锁定长江口
 - [x] 09 拼贴剪贴 —— 绅士照剪开脑袋，星云蹦出来（12fps 逐格）
-- [ ] 06 ~ 15 待解锁
+- [x] 10 弥散渐变玻璃拟态 —— 极光打底，三块磨砂玻璃浮上来，液态玻璃珠长成透镜再收成句号
+- [ ] 11 ~ 15 待解锁
 
 ## 快速开始
 
@@ -40,7 +42,7 @@
 | 依赖 | 用途 | 备注 |
 |------|------|------|
 | Python 3.10+ | 全部脚本 | 作者用 3.12 |
-| Pillow + numpy | 01 / 03 / 04 渲染 | `pip install pillow numpy` |
+| Pillow + numpy | 01 / 03 / 04 / 10 渲染 | `pip install pillow numpy` |
 | ffmpeg（任意 PATH 版本） | PNG 帧 → MP4 / GIF | 编码命令见各文档 |
 | Blender 4.5 | 仅 02 | 无头模式 `blender -b`，装了 4.x 大概率能跑 |
 
@@ -71,6 +73,11 @@ ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slow -crf 17 -
 cd 05-3d-render
 blender -b -P build_soft.py -- full 60
 ffmpeg -y -framerate 60 -i frames_60/f_%04d.png -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -movflags +faststart output.mp4
+
+# 10 弥散渐变玻璃拟态（纯 numpy，多进程；内存紧就把并发数调小）
+cd 10-aurora-glass
+python make_aurora.py all 3
+ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -movflags +faststart output.mp4
 ```
 
 ## 为什么仓库里没有帧序列？

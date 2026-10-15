@@ -20,6 +20,7 @@
 | 09 | 拼贴剪贴 Collage Cut-out | ![拼贴](09-collage-cutout/preview.gif) | 零素材程序拼贴 + 半调网点化 + 12fps 逐格步进 | [README](09-collage-cutout/README.md) |
 | 10 | 弥散渐变玻璃拟态 Aurora Glassmorphism | ![极光玻璃](10-aurora-glass/preview.gif) | 各向异性光斑 + fbm 扭曲 + 透视玻璃 SDF 折射 + 液态玻璃色散 + bloom | [README](10-aurora-glass/README.md) |
 | 11 | 几何构成包豪斯 Geometric Bauhaus | ![包豪斯](11-bauhaus/preview.gif) | 四色分色版 + 挖空套印 + 卡片翻转级联 + 12 齿擒纵 + 印刷纸纹 | [README](11-bauhaus/README.md) |
+| 12 | 复古 Synthwave Neon Drive | ![synthwave](12-synthwave/preview.gif) | 纯 numpy 光线投射 3D + 条纹落日 + 无限霓虹网格 + 磁带时间重映射 + VHS 色度延迟 | [README](12-synthwave/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -34,7 +35,8 @@
 - [x] 09 拼贴剪贴 —— 绅士照剪开脑袋，星云蹦出来（12fps 逐格）
 - [x] 10 弥散渐变玻璃拟态 —— 极光打底，三块磨砂玻璃浮上来，液态玻璃珠长成透镜再收成句号
 - [x] 11 几何构成包豪斯 —— 圆方三角红黄蓝，120 BPM 用 20 拍把一张海报搭起来，中途整张翻版再转回
-- [ ] 12 ~ 15 待解锁
+- [x] 12 复古 Synthwave —— 霓虹网格 + 条纹落日 + 跑车冲向地平线，磁带故障与 VHS 色度延迟
+- [ ] 13 ~ 15 待解锁
 
 ## 快速开始
 
@@ -44,7 +46,7 @@
 | 依赖 | 用途 | 备注 |
 |------|------|------|
 | Python 3.10+ | 全部脚本 | 作者用 3.12 |
-| Pillow + numpy | 01 / 03 / 04 / 10 / 11 渲染 | `pip install pillow numpy` |
+| Pillow + numpy | 01 / 03 / 04 / 10 / 11 / 12 渲染 | `pip install pillow numpy` |
 | ffmpeg（任意 PATH 版本） | PNG 帧 → MP4 / GIF | 编码命令见各文档 |
 | Blender 4.5 | 仅 02 | 无头模式 `blender -b`，装了 4.x 大概率能跑 |
 
@@ -85,6 +87,11 @@ ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slow -crf 17 -
 cd 11-bauhaus
 python make_bauhaus.py all 3
 ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slow -crf 17 -pix_fmt yuv420p -movflags +faststart output.mp4
+
+# 12 复古 Synthwave（纯 numpy 光线投射 3D，重；5 并发是本机上限）
+cd 12-synthwave
+python make_synth.py all 5
+ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slow -crf 19 -pix_fmt yuv420p -movflags +faststart output.mp4
 ```
 
 ## 为什么仓库里没有帧序列？

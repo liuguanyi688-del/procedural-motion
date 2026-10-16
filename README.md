@@ -22,6 +22,7 @@
 | 11 | 几何构成包豪斯 Geometric Bauhaus | ![包豪斯](11-bauhaus/preview.gif) | 四色分色版 + 挖空套印 + 卡片翻转级联 + 12 齿擒纵 + 印刷纸纹 | [README](11-bauhaus/README.md) |
 | 12 | 复古 Synthwave Neon Drive | ![synthwave](12-synthwave/preview.gif) | 纯 numpy 光线投射 3D + 条纹落日 + 无限霓虹网格 + 磁带时间重映射 + VHS 色度延迟 | [README](12-synthwave/README.md) |
 | 13 | 像素风 Pixel Art | ![像素风](13-pixel-art/preview.gif) | 320×180 索引色 + 128 语义槽 × 6 时段 LUT + 调色板轮换 + 有序抖动 + CRT 扫描线 | [README](13-pixel-art/README.md) |
+| 14 | 液态流动 Liquid Motion | ![液态](14-liquid/preview.gif) | 全屏 SDF 平滑并集 + 厚度定色 + 球冠高度场法线 + 影棚反射 + 波前水淹 + mip bloom | [README](14-liquid/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -38,7 +39,8 @@
 - [x] 11 几何构成包豪斯 —— 圆方三角红黄蓝，120 BPM 用 20 拍把一张海报搭起来，中途整张翻版再转回
 - [x] 12 复古 Synthwave —— 霓虹网格 + 条纹落日 + 跑车冲向地平线，磁带故障与 VHS 色度延迟
 - [x] 13 像素风 Pixel Art —— 320×180 索引色，从清晨一路走到星夜，水波和星星只转色号不重画
-- [ ] 14 ~ 15 待解锁
+- [x] 14 液态流动 Liquid Motion —— 一滴水落下、弹跳、融合、跃起、决堤淹没全屏，退去时留下液态字标 drop
+- [ ] 15 待解锁
 
 ## 快速开始
 
@@ -49,6 +51,7 @@
 |------|------|------|
 | Python 3.10+ | 全部脚本 | 作者用 3.12 |
 | Pillow + numpy | 01 / 03 / 04 / 10 / 11 / 12 / 13 渲染 | `pip install pillow numpy` |
+| Pillow + numpy + scipy | 14 渲染（scipy 只用于字形的距离变换） | `pip install pillow numpy scipy` |
 | ffmpeg（任意 PATH 版本） | PNG 帧 → MP4 / GIF | 编码命令见各文档 |
 | Blender 4.5 | 仅 02 | 无头模式 `blender -b`，装了 4.x 大概率能跑 |
 
@@ -98,6 +101,11 @@ ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slow -crf 19 -
 # 13 像素风（最快的一版，600 帧约 1 分钟）
 cd 13-pixel-art
 python make_pixel.py all 4
+ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slower -crf 18 -pix_fmt yuv420p -movflags +faststart output.mp4
+
+# 14 液态流动（全屏 SDF，约 4 秒/帧，2 并发约 20 分钟；瓶颈是内存不是核数）
+cd 14-liquid
+python make_liquid.py all 2
 ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slower -crf 18 -pix_fmt yuv420p -movflags +faststart output.mp4
 ```
 

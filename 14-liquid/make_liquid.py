@@ -93,18 +93,20 @@ eInOut = bezier(0.65, 0.0, 0.35, 1.0)
 eIn = bezier(0.5, 0.0, 0.9, 0.4)
 eOut = bezier(0.33, 0.9, 0.4, 1.0)
 eFront = bezier(0.28, 0.55, 0.42, 1.0)
+flung = bezier(0.22, 1.0, 0.36, 1.0)      # "甩出去"的缓动（溅射触须用）
 
 
 def spring(t, f=4.0, z=0.3):
-    """过冲弹簧（0 → 1，带一点回弹）"""
+    """阻尼阶跃响应 0 → 1，带过冲。
+
+    不能写成 `if t >= 1: return 1.0` —— 落地压扁要在这个响应里振荡好几次，
+    提前截断就变成"瞬间归位"，弹性全没了，看着就是个硬球。
+    """
     if t <= 0:
         return 0.0
-    if t >= 1:
-        return 1.0
-    w = 2 * math.pi * f
-    d = math.exp(-z * w * t)
-    return 1.0 - d * (math.cos(w * math.sqrt(max(0.0, 1 - z * z)) * t) +
-                      z / math.sqrt(max(1e-6, 1 - z * z)) * math.sin(w * math.sqrt(max(0.0, 1 - z * z)) * t))
+    w = 2.0 * math.pi * f
+    wd = w * math.sqrt(max(1e-6, 1.0 - z * z))
+    return 1.0 - math.exp(-z * w * t) * (math.cos(wd * t) + (z * w / wd) * math.sin(wd * t))
 
 
 def wob(t, f, decay):
@@ -343,9 +345,166 @@ def add_seg(S, ax_, ay_, bx_, by_, ra, rb, u):
         S["segs"].append((float(ax_), float(ay_), float(bx_), float(by_), float(ra), float(rb), float(u)))
 
 
+# ----------------------------------------------------------------- 落雨：四滴 + 溅射皇冠
+SV_PUD = 0.52          # 静止水洼的竖直比例（扁透镜：高只有半径的一半）
+TEN_T = 0.27           # 溅射皇冠的寿命
+
+# x / 半径 / 色相 / 落地时刻 / 落地弹性的阻尼
+DROPS = [
+    dict(x=640.0, r=56.0, u=0.05, tLand=0.40, z=0.50),
+    dict(x=1250.0, r=46.0, u=0.62, tLand=0.80, z=0.50),
+    dict(x=405.0, r=42.0, u=0.95, tLand=1.20, z=0.50),
+    dict(x=960.0, r=74.0, u=0.36, tLand=1.60, z=0.62),
+]
+# 三摊水跳进中心（P4 已经在中心等着被灌满）
+HOPS = [dict(who=0, tc=2.00, side=-1.0), dict(who=2, tc=2.40, side=-1.0),
+        dict(who=1, tc=2.80, side=+1.0)]
+HOP_T = 0.34
+
+
+def sv_land(d, tl):
+    """落地后的竖直比例。
+
+    从压扁的 1.3 振荡收敛到 0.52——**收敛到扁透镜，不是弹回球形**。
+    液体落地是靠表面张力把动能吃掉，不是像橡皮球那样把能量还回来。
+    """
+    s = 1.3 + (SV_PUD - 1.3) * spring(tl + 1.3 / 30.0, 6.0, d.get("z", 0.5))
+    if s < SV_PUD:
+        s = SV_PUD - (SV_PUD - s) * 0.45      # 过冲减半，避免"热狗"式翻边
+    return s
+
+
+_TEN = None
+_CROWN = None
+
+
+def tendrils():
+    """每滴落地时长出的触须参数（固定种子，纯函数）"""
+    global _TEN
+    if _TEN is not None:
+        return _TEN
+    rnd = np.random.default_rng(20261017)
+    out = []
+    for d in DROPS:
+        big = d["r"] > 60.0
+        n = 7 if big else 5
+        ts = []
+        for k in range(n):
+            c = (k / (n - 1.0)) * 2.0 - 1.0 + rnd.uniform(-0.07, 0.07)
+            ang = c * 0.95 + rnd.uniform(-0.12, 0.12)          # 相对竖直的偏角
+            L = d["r"] * (0.9 + 0.5 * abs(c)) * rnd.uniform(0.72, 1.22) * (1.08 if big else 1.0)
+            tDet = 0.07 + rnd.uniform(0.0, 1.1 / 30.0) + 0.02 * abs(c)
+            rb = d["r"] * rnd.uniform(0.070, 0.095) * rnd.uniform(0.6, 1.4)
+            ts.append(dict(c=c, ang=ang, L=L, tDet=tDet, rb=rb))
+        out.append(ts)
+    _TEN = out
+    return out
+
+
+def tendril_state(d, w, tl):
+    """一根触须：从溅射体顶部内缘长出 → 顶端鼓珠 → 掐断 → 回缩（带回弹鼓包）。
+
+    返回 (bx, by, mx, my, tx, ty, ra, rm, rt, bead)。
+    """
+    if tl < 0.0 or tl > TEN_T:
+        return None
+    sv = sv_land(d, tl)
+    ax = d["r"] / sv
+    ay = d["r"] * sv
+    cy = FY - ay + 1.0
+    bx = d["x"] + w["c"] * ax * 0.46
+    by = cy - ay * math.sqrt(max(0.0, 1.0 - (w["c"] * 0.46) ** 2)) + ay * 0.45
+    bead = 0.0
+    if tl < w["tDet"]:
+        k = tl / w["tDet"]
+        ln = w["L"] * float(flung(k))
+        pinch = float(sstep(0.45, 1.0, k))
+        bead = 0.55 + 0.45 * k
+    else:
+        q = 1.0 - spring(tl - w["tDet"], 5.0, 0.34)          # 回缩；负瓣 = 回弹鼓包
+        ln = w["L"] * 0.62 * (q if q >= 0.0 else -0.45 * q) * (1.0 - float(sstep(0.17, TEN_T, tl)))
+        pinch = 1.0
+    dx = math.sin(w["ang"])
+    dy = -math.cos(w["ang"])
+    droop = 0.22 * ln * abs(dx)                              # 重力把倾斜的触须压成弧
+    mx = bx + dx * ln * 0.5
+    my = by + dy * ln * 0.5 + droop * 0.25
+    tx = bx + dx * ln
+    ty = by + dy * ln + droop
+    ra = d["r"] * 0.16 * (1.0 - 0.3 * abs(w["c"]))
+    rm = ra * (0.55 + (0.42 - 0.55) * pinch)
+    rt = rm * 0.80 + (d["r"] * 0.035 - rm * 0.80) * pinch
+    return bx, by, mx, my, tx, ty, ra, rm, rt, bead * w["rb"]
+
+
+def crown():
+    """触须顶端掐断后飞出去的二次液滴（弹道解出来的）"""
+    global _CROWN
+    if _CROWN is not None:
+        return _CROWN
+    rnd = np.random.default_rng(7717)
+    out = []
+    for di, d in enumerate(DROPS):
+        big = d["r"] > 60.0
+        for w in tendrils()[di]:
+            st = tendril_state(d, w, w["tDet"] - 1e-4)
+            if st is None:
+                continue
+            tx, ty = st[4], st[5]
+            ang = w["ang"] + rnd.uniform(-0.21, 0.21)
+            sp = rnd.uniform(480.0, 760.0) * rnd.uniform(0.75, 1.25) * (1.15 if big else 1.0)
+            x0 = tx + math.sin(w["ang"]) * w["rb"]
+            y0 = ty - math.cos(w["ang"]) * w["rb"]
+            T = rnd.uniform(6.0, 8.5) / 30.0
+            vy = (0.5 * G * T * T - (FY - w["rb"] - y0)) / T
+            c = dict(x0=x0, y0=y0, vx=math.sin(ang) * sp * 1.1, vy=vy,
+                     r=w["rb"], u=d["u"] + rnd.uniform(-0.05, 0.05),
+                     tEmit=d["tLand"] + w["tDet"])
+            dy = FY - c["r"] - c["y0"]
+            tf = (c["vy"] + math.sqrt(max(0.0, c["vy"] ** 2 + 2.0 * G * dy))) / G
+            c["tHit"] = c["tEmit"] + tf
+            c["xHit"] = c["x0"] + c["vx"] * tf
+            out.append(c)
+    _CROWN = out
+    return out
+
+
+def mass_r(t):
+    """合并后的半径：**按面积相加**（液体的体积守恒，不是半径相加）"""
+    a = DROPS[3]["r"] ** 2
+    for h in HOPS:
+        a += DROPS[h["who"]]["r"] ** 2 * float(sstep(h["tc"] - 0.02, h["tc"] + 0.16, t))
+    return math.sqrt(a)
+
+
+_SPRAY = None
+
+
+def spray():
+    """决堤落点溅起的大液滴（参考里的 impact spray，14 颗）"""
+    global _SPRAY
+    if _SPRAY is not None:
+        return _SPRAY
+    rnd = np.random.default_rng(31337)
+    out = []
+    for i in range(14):
+        side = 1.0 if i % 2 else -1.0
+        c = dict(x0=960.0 + side * rnd.uniform(40.0, 260.0), y0=FY - rnd.uniform(30.0, 90.0),
+                 vx=side * rnd.uniform(80.0, 700.0), vy=rnd.uniform(1500.0, 2700.0),
+                 r=rnd.uniform(9.0, 26.0), u=rnd.uniform(0.2, 0.9),
+                 t0=4.0 + rnd.uniform(1.0, 3.0) / 30.0)
+        dy = FY - c["r"] - c["y0"]
+        tf = (c["vy"] + math.sqrt(max(0.0, c["vy"] ** 2 + 2.0 * G * dy))) / G
+        c["tHit"] = c["t0"] + tf
+        c["xHit"] = c["x0"] + c["vx"] * tf
+        out.append(c)
+    _SPRAY = out
+    return out
+
+
 def film(t):
     """给定时刻，返回整个画面的液态状态（纯函数）"""
-    S = dict(balls=[], segs=[], letters=[], flood=None,
+    S = dict(balls=[], segs=[], letters=[], flood=None, ghosts=[],
              rip=dict(x=960.0, y=FY, age=0.0, amp=0.0),
              keyx=KEY[0], bloom=0.55, flash=0.0, caus=0.0, ring=None)
 
@@ -358,82 +517,125 @@ def film(t):
             add_ball(S, 640.0, FY - 30.0, 22.0, 0.05, 1.0, 1.05)
         else:
             # 流断开：上半截回抽，下半截落成水珠
-            k = clip((t - ps) / 0.30)
+            k = clip((t - ps) / 0.18)
             add_seg(S, 640.0, 150.0 - 320.0 * eIn(k), 640.0, FY - 26.0 - 90.0 * eIn(k),
                     13.0 * (1 - k), 12.0 * (1 - k), 0.05)
             if k < 1.0:
                 add_ball(S, 640.0, FY - 30.0 - 40.0 * k, 22.0 * (1 - 0.35 * k), 0.05,
                          1.0 + 0.4 * k, 1.0 - 0.3 * k)
 
-    # ---------- 2. 落雨（0.4 – 2.0）：四滴落下、压扁、弹起；融合一开始就交给融合段
-    if t < 2.05:
-        for (tl, x0, sz, u) in LANDINGS:
-            fall = 0.30
-            t0 = tl - fall
-            if t < t0:
+    # ---------- 2. 落雨（0.4 – 2.0）：四滴砸下来，落地溅出皇冠
+    # 关键：**不弹跳**。落地靠 spring 把动能吃掉，收敛成一个扁透镜；
+    # 溅起来的能量全部交给皇冠触须和掐断的小液滴——那才是液体的样子。
+    for di, d in enumerate(DROPS):
+        tl = t - d["tLand"]
+        if tl < -1.6 or t > 2.02:
+            continue        # 融合一开始，原位的水洼就交给融合段了，不能再画
+        if tl < 0.0:
+            # 自由落体（落点时刻给定，起始高度反解出来）
+            yy = FY - d["r"] - 0.5 * G * tl * tl
+            vy = -G * tl
+            sv = 1.0 + min(0.45, vy / 5200.0)          # 速度越快拉得越长
+            add_ball(S, d["x"], yy, d["r"], d["u"], sv, 1.0 / sv, math.pi * 0.5)
+            continue
+        # 落地：扁透镜（不是球）
+        sv = sv_land(d, tl)
+        add_ball(S, d["x"], FY - d["r"] * sv + 0.5, d["r"], d["u"], 1.0 / sv, sv)
+        # 溅射皇冠：5-7 根触须，顶端鼓珠
+        for w in tendrils()[di]:
+            st = tendril_state(d, w, tl)
+            if st is None:
                 continue
-            r0 = 26.0 * sz
-            if t < tl:
-                k = clip((t - t0) / fall)
-                y = 140.0 + (FY - 34.0 * sz - 140.0) * (k * k)
-                add_ball(S, x0, y, r0 * (1.0 - 0.16 * k), u, 1.0 - 0.22 * k, 1.0 + 0.30 * k)
-                continue
-            dt = t - tl
-            # 压扁 → 弹起 → 再落 → 静止
-            if dt < 0.115:
-                k = dt / 0.115
-                sq = math.sin(math.pi * k)
-                add_ball(S, x0, FY - r0 * 0.80 + r0 * 0.24 * sq, r0 * (1.0 + 0.42 * sq), u,
-                         1.0 + 0.46 * sq, 1.0 - 0.34 * sq)
-            elif dt < 0.42:
-                k = (dt - 0.115) / 0.305
-                hop = 46.0 * sz * math.sin(math.pi * k)
-                add_ball(S, x0, FY - r0 * 0.80 - hop, r0 * (1.0 - 0.06 * math.sin(math.pi * k)), u,
-                         1.0 + 0.10 * math.cos(math.pi * k), 1.0 + 0.10 * math.sin(math.pi * k))
-            else:
-                k = clip((dt - 0.42) / 0.35)
-                add_ball(S, x0, FY - r0 * 0.78 + 2.0 * wob(dt - 0.42, 3.2, 0.30), r0 * 1.02, u,
-                         1.14 - 0.06 * k, 0.90 + 0.06 * k)
+            bx, by, mx, my, tx, ty, ra, rm, rt, bead = st
+            if abs(tx - bx) + abs(ty - by) > 0.8:
+                add_seg(S, bx, by, mx, my, ra, rm, d["u"])
+                add_seg(S, mx, my, tx, ty, rm, rt, d["u"])
+            if bead > 0.6:
+                add_ball(S, tx, ty, bead, d["u"])
 
-    # ---------- 3. 融合（2.0 – 3.2）：四滴向中心聚拢、融成一摊
-    if 2.0 <= t < 3.22:
-        pts = []
-        for i, (tl, x0, sz, u) in enumerate(LANDINGS):
-            kk = float(eInOut(clip((t - 2.0 - i * 0.14) / 0.52)))
-            if kk <= 0.0:
+    # 皇冠掐断后飞出去的二次液滴
+    for c in crown():
+        tt = t - c["tEmit"]
+        if tt < 0.0:
+            continue
+        if tt < (c["tHit"] - c["tEmit"]):
+            x = c["x0"] + c["vx"] * tt
+            y = c["y0"] - c["vy"] * tt + 0.5 * G * tt * tt
+            vy = -c["vy"] + G * tt
+            sp = math.hypot(c["vx"], vy)
+            sv = 1.0 + min(0.45, sp / 5200.0)
+            add_ball(S, x, y, c["r"], c["u"], sv, 1.0 / sv, math.atan2(vy, c["vx"]))
+        else:
+            dt = t - c["tHit"]
+            if dt > 0.42:
                 continue
-            r = 26.0 * sz * (1.0 + 0.55 * kk)
-            x = x0 + (960.0 - x0) * kk
-            add_ball(S, x, FY - r * 0.76, r, u, 1.16 + 0.14 * kk, 0.88 - 0.10 * kk)
-            pts.append((x, r, u))
-        # 融合的颈部（拉丝）：只连接靠得够近的相邻两滴。
-        # 早先我用一根横跨全屏的长胶囊当"颈"，结果四滴被拉成一根 1400px 的长棒——
-        # 液体的脖子是**局部**现象，只能长在快要碰上的两滴之间。
-        pts.sort()
-        for a in range(len(pts) - 1):
-            x1, r1, u1 = pts[a]
-            x2, r2, u2 = pts[a + 1]
-            gap = (x2 - x1) - r1 - r2
-            if gap < 200.0:
-                w = float(clip(1.0 - gap / 200.0))
-                add_seg(S, x1, FY - r1 * 0.55, x2, FY - r2 * 0.55,
-                        r1 * 0.72 * w, r2 * 0.72 * w, (u1 + u2) * 0.5)
+            k = 1.0 - float(sstep(0.0, 0.40, dt))       # 落进主水洼后被吸收
+            if k < 0.03:
+                continue
+            sv2 = sv_land(dict(r=c["r"], z=0.5), dt)
+            add_ball(S, c["xHit"], FY - c["r"] * k * sv2 + 0.5, c["r"] * k, c["u"], 1.0 / sv2, sv2)
+
+    # ---------- 3. 融合（2.0 – 3.2）：三摊水跳进中心，P4 在原地被灌满
+    if 2.0 <= t < 3.34:
+        R = mass_r(t)
+        add_ball(S, 960.0, FY - R * 0.92, R, 0.36, 1.0, 0.92)
+        for h in HOPS:
+            d = DROPS[h["who"]]
+            tt = t - (h["tc"] - HOP_T)
+            if tt < 0.0 or tt > HOP_T:
+                continue
+            k = tt / HOP_T
+            x1 = 960.0 + h["side"] * 42.0
+            yb = FY - d["r"] * 0.92
+            yl = FY - 50.0
+            vy0 = G * HOP_T / 2.0 + 60.0 / HOP_T
+            x = d["x"] + (x1 - d["x"]) * k
+            y = yb - vy0 * tt + 0.5 * G * tt * tt + (yl - yb) * k
+            vx = (x1 - d["x"]) / HOP_T
+            vyv = -vy0 + G * tt + (yl - yb) / HOP_T
+            sp = math.hypot(vx, vyv)
+            sv = 1.0 + min(0.30, sp / 6000.0)
+            add_ball(S, x, y, d["r"], d["u"], sv, 1.0 / sv, math.atan2(vyv, vx))
+        # 内部色团：合并进来的水在质量内部继续绕转（只贡献颜色，不贡献距离）
+        for j, h in enumerate(HOPS):
+            kk = float(sstep(h["tc"] + 0.02, h["tc"] + 0.30, t))
+            if kk <= 0.01:
+                continue
+            a = j * 2.1 + 1.5 * (t - h["tc"]) + h["side"] * 0.9
+            rg = min(DROPS[h["who"]]["r"] * 0.9, R * 0.62)
+            S["ghosts"].append((960.0 + math.cos(a) * 0.40 * R,
+                                (FY - R * 0.92) + math.sin(a) * 0.34 * R,
+                                rg, DROPS[h["who"]]["u"], 0.85 * kk))
 
     # ---------- 4. 跃起（3.2 – 4.0）：整摊水跳起来
     if 3.2 <= t < 4.02:
         tt = t - 3.2
-        mass_r = 150.0
-        y0 = FY - mass_r * 0.80
+        R = mass_r(3.2)
+        y0 = FY - R * 0.92
         y = y0 - 1500.0 * tt + 0.5 * 3750.0 * tt * tt
-        k = clip(tt / 0.8)
-        # 起跳前的下蹲已经由融合段接手；这里是"面团"离地
         if tt < 0.06:
             sq = tt / 0.06
-            add_ball(S, 960.0, FY - mass_r * 0.80 + mass_r * 0.30 * sq, mass_r * (1.0 + 0.10 * sq),
-                     0.42, 1.10 + 0.16 * sq, 0.92 - 0.14 * sq)
+            add_ball(S, 960.0, y0 + R * 0.28 * sq, R * (1.0 + 0.10 * sq), 0.42,
+                     1.0 + 0.16 * sq, 1.0 - 0.14 * sq)
         else:
-            add_ball(S, 960.0, max(y, FY - mass_r * 3.4), mass_r * (1.0 + 0.06 * math.sin(tt * 9.0)),
-                     0.42, 1.0 - 0.10 * math.sin(tt * 11.0), 1.0 + 0.12 * math.sin(tt * 11.0))
+            add_ball(S, 960.0, max(y, FY - R * 3.4), R * (1.0 + 0.06 * math.sin(tt * 9.0)), 0.42,
+                     1.0 - 0.10 * math.sin(tt * 11.0), 1.0 + 0.12 * math.sin(tt * 11.0))
+    # 冲击溅射：砸下来溅起的 14 个大液滴
+    for sp in spray():
+        tt = t - sp["t0"]
+        if tt < 0.0 or t > sp["tHit"] + 0.55:
+            continue
+        if t < sp["tHit"]:
+            x = sp["x0"] + sp["vx"] * tt
+            y = sp["y0"] - sp["vy"] * tt + 0.5 * G * tt * tt
+            vy = -sp["vy"] + G * tt
+            s2 = math.hypot(sp["vx"], vy)
+            sv = 1.0 + min(0.45, s2 / 5200.0)
+            add_ball(S, x, y, sp["r"], sp["u"], sv, 1.0 / sv, math.atan2(vy, sp["vx"]))
+        else:
+            k = 1.0 - float(sstep(0.0, 0.50, t - sp["tHit"]))
+            if k > 0.03:
+                add_ball(S, sp["xHit"], FY - sp["r"] * k + 0.5, sp["r"] * k, sp["u"])
 
     # ---------- 5. 决堤（4.0 – 4.42）：落回 → 溅起 → 水淹没全屏
     if 4.0 <= t < 4.42:
@@ -631,6 +833,29 @@ def field_at(S, X, Y, cam, y_off=0, K=0.080, DCLIP=240.0):
         gy[s0:s1, x0:x1] += wt * gyp
         uu[s0:s1, x0:x1] += wt * u
 
+    # ---- 内部色团：只贡献颜色，不进距离场
+    # 合并进来的那几摊水没有消失，它们在中心质量里继续绕转——
+    # 这就是"大理石纹"的来源。参考用 4 个只上色不进 SDF 的球实现。
+    gw = np.zeros((h, w), np.float32)
+    gu = np.zeros((h, w), np.float32)
+    for (gx_, gy_, gr, guc, ga) in S.get("ghosts", ()):
+        rad = gr * zoom
+        x0 = int(max(0, math.floor((gx_ - ccx) * zoom + 959.5 - rad)))
+        x1 = int(min(W, math.ceil((gx_ - ccx) * zoom + 959.5 + rad) + 1))
+        ry0 = int(max(y_off, math.floor((gy_ - ccy) * zoom + 539.5 - rad)))
+        ry1 = int(min(y_off + h, math.ceil((gy_ - ccy) * zoom + 539.5 + rad) + 1))
+        if x1 <= x0 or ry1 <= ry0:
+            continue
+        s0, s1 = ry0 - y_off, ry1 - y_off
+        Xs = X[s0:s1, x0:x1] - gx_
+        Ys = Y[s0:s1, x0:x1] - gy_
+        rho = np.sqrt(Xs * Xs + Ys * Ys) / max(gr, 1e-3)
+        wgt = (1.0 - sstep(0.25, 1.0, rho)) * ga
+        cur = gw[s0:s1, x0:x1]
+        better = wgt > cur
+        gw[s0:s1, x0:x1] = np.where(better, wgt, cur)
+        gu[s0:s1, x0:x1] = np.where(better, guc, gu[s0:s1, x0:x1])
+
     # ---- 水淹：一条带正弦波前的宽带（两个波前取平滑最大值）
     fl = S["flood"]
     if fl is not None:
@@ -671,7 +896,10 @@ def field_at(S, X, Y, cam, y_off=0, K=0.080, DCLIP=240.0):
 
     accs = np.maximum(acc, 1e-30)
     D = -np.log(accs) / K
-    return D, gx / accs, gy / accs, uu / accs
+    Uo = uu / accs
+    if gw.max() > 0.002:
+        Uo = Uo * (1.0 - gw) + gu * gw
+    return D, gx / accs, gy / accs, Uo
 # ----------------------------------------------------------------- 着色
 def shade(D, Gx, Gy, U, X, Y, t, glint=0.0, deep=1.0, sheet=False):
     """液态着色：厚度定色，SDF 转球冠高度场求法线，再上影棚反射。
@@ -719,13 +947,18 @@ def shade(D, Gx, Gy, U, X, Y, t, glint=0.0, deep=1.0, sheet=False):
             qy = Ym * 0.00118
             w1 = np.sin(qx * 3.1 + qy * 2.0 + t * 0.50)
             w2 = np.sin((qx + 0.80 * w1) * 3.4 - qy * 2.6 + t * 0.35)
-            ph = 1.5 * w2 + 0.7 * w1
+            w3 = np.sin((qx + 0.55 * w2) * 5.7 + (qy + 0.45 * w1) * 4.3 + t * 0.62)
+            ph = 1.2 * w2 + 0.6 * w1 + 0.25 * w3
             band = np.sin(ph)
             A = 26.0 * dp
-            ghx += A * 0.5 * np.cos(ph) * (0.00118 * 3.4 * 1.5)
-            ghy += A * 0.5 * np.cos(ph) * (0.00118 * 2.6 * 1.5)
+            # 法线扰动要够大才有起伏。参考里噪声梯度给的扰动约是 SDF 梯度的 60%，
+            # 我按正弦系数算只有 30%——水面就成了一块平板。
+            ghx += A * 0.5 * np.cos(ph) * (0.00118 * 3.4 * 2.2)
+            ghy += A * 0.5 * np.cos(ph) * (0.00118 * 2.6 * 2.2)
             vein = sstep(0.35, 0.8, band) - sstep(-0.35, -0.8, band)
-            du = dp * (0.40 * vein + 0.10 * w2)
+            # 幅度别开太大：u 的整段粉→紫只有 0.5 宽，du 给到 0.5 就会把渐变吃穿，
+            # 水淹看起来就是几条纯色带而不是液体
+            du = dp * (0.22 * vein + 0.06 * w2)
 
         nl = np.sqrt(ghx * ghx + ghy * ghy + 1.0)
         nx = -ghx / nl
@@ -760,13 +993,15 @@ def shade(D, Gx, Gy, U, X, Y, t, glint=0.0, deep=1.0, sheet=False):
             fr = fr * (1.0 - sstep(30.0, 48.0, x) * 0.75)
         col = col * (1.0 - fr)[..., None] + env_map(rx, ry, rz) * fr[..., None]
 
-        # 大平液面（水淹）的宽镜面光带
+        # 大平液面（水淹）的宽镜面光带。
+        # 指数别照抄 380：水淹的法线只倾斜 3-4°，dot 约 0.987，380 次方直接归零，
+        # 光带根本出不来，水面就成了一块死色板。80 次方才是"宽而软"的一条。
         if sheet:
             deepm = sstep(90.0, 320.0, x) * deep
             if deepm.any():
                 nlb = math.sqrt(0.16 ** 2 + 0.22 ** 2 + 1.0)
-                sb = np.power(np.maximum((rx * -0.16 + ry * -0.22 + rz * 1.0) / nlb, 0.0), 380.0)
-                col += np.array([1.0, 0.90, 0.95], np.float32) * (sb * deepm * 1.6)[..., None]
+                sb = np.power(np.maximum((rx * -0.16 + ry * -0.22 + rz * 1.0) / nlb, 0.0), 12.0)
+                col += np.array([1.0, 0.90, 0.95], np.float32) * (sb * deepm * 0.9)[..., None]
 
         # 光扫：一道斜向的窄带扫过液体
         if glint > 0.0:
@@ -881,11 +1116,11 @@ def render_frame(t):
     # ---- 碳酸气泡（水淹期间水体内部的小气泡）
     if S["caus"] > 0.01:
         bl = 0
-        for i in range(26):
+        for i in range(44):
             bx = 300.0 + h21(i * 1.7, 3.1) * 1320.0
             by = 620.0 + h21(i * 2.3, 7.7) * 380.0
-            rr = 2.0 + h21(i * 3.1, 1.3) * 3.2
-            if h21(i * 5.3, 9.1) > 0.65:
+            rr = 1.8 + h21(i * 3.1, 1.3) * 3.6
+            if h21(i * 5.3, 9.1) > 0.85:
                 continue
             dd = np.sqrt((Xw - bx) ** 2 + (Yw - by) ** 2)
             bl += np.exp(-((dd - rr) / 1.4) ** 2)

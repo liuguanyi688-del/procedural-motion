@@ -257,123 +257,34 @@ def draw_line(dst, text, st, cx, cy, t, t0s, sp_x=None, **kw):
 # ----------------------------------------------------------------- 三只猫（程序生成，零素材）
 _CAT = {}
 
-
-def _bokeh(d, w, h, seed, n=26, warm=False):
-    rng = np.random.default_rng(seed)
-    for _ in range(n):
-        cx = rng.uniform(-0.1, 1.1) * w
-        cy = rng.uniform(-0.1, 1.1) * h
-        r = rng.uniform(0.03, 0.14) * w
-        a = rng.uniform(18, 62)
-        if warm:
-            col = (255, int(rng.uniform(190, 230)), int(rng.uniform(110, 170)), int(a))
-        else:
-            col = (int(rng.uniform(120, 190)), int(rng.uniform(180, 230)), 255, int(a))
-        d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=col)
+# 三张真实照片，正好对应三种情绪
+# (文件, 色调乘子, 裁剪中心 x/y 比例)
+ASSETS = {
+    "sun":   ("white_dof.jpg", (1.07, 1.00, 0.93), 0.50, 0.52),   # 白猫眯眼晒太阳，暖金石板路
+    "stare": ("tux_r1.jpg",    (0.90, 0.97, 1.14), 0.50, 0.46),   # 黑白猫绿眼凝视，蓝涂鸦墙
+    "fluff": ("grey_r2.jpg",   (1.15, 0.84, 1.08), 0.55, 0.50),   # 灰猫特写，草地调成粉紫
+}
+_CW, _CH = int(W * 1.30), int(H * 1.30)      # 比画幅大 30%，给运镜留推拉空间
 
 
 def cat_image(mood):
-    """背光猫剪影 + bokeh 背景。
-
-    第一版我试图用 PIL 画一张"写实猫脸"，结果是个卡通头像——PIL 画不出毛发和
-    皮肤质感，越努力越像贴纸。换成**剪影**：轮廓只需要准确，细节全部交给背景的
-    大光圈光斑和发光的眼睛。反而更像一张虚化的照片。
-    """
+    """真实猫咪照片：缩放填满 → 按指定中心裁剪 → 调色 → 轻微柔化。"""
     if mood in _CAT:
         return _CAT[mood]
-    w, h = 1500, 2100
-    if mood == "sun":
-        top, bot, bok = (26, 15, 9), (96, 58, 26), (255, 198, 118)
-    elif mood == "stare":
-        top, bot, bok = (7, 9, 17), (24, 33, 56), (140, 190, 255)
-    else:
-        top, bot, bok = (19, 9, 23), (60, 30, 56), (255, 148, 208)
-
-    base = Image.new("RGB", (w, h), (0, 0, 0))
-    bd = ImageDraw.Draw(base, "RGBA")
-    for y in range(h):
-        k = y / h
-        bd.line([(0, y), (w, y)], fill=tuple(int(lerp(top[i], bot[i], k)) for i in range(3)))
-    rng = np.random.default_rng(11 if mood == "sun" else (23 if mood == "stare" else 37))
-    for _ in range(36):
-        cx_ = rng.uniform(-0.12, 1.12) * w
-        cy_ = rng.uniform(-0.12, 1.12) * h
-        r = rng.uniform(0.04, 0.19) * w
-        bd.ellipse([cx_ - r, cy_ - r, cx_ + r, cy_ + r], fill=bok + (int(rng.uniform(18, 74)),))
-    base = base.filter(ImageFilter.GaussianBlur(32))
-
-    # ---- 剪影遮罩
-    cx, cy = w * 0.50, h * 0.60
-    rw, rh = w * 0.290, h * 0.248
-    m = Image.new("L", (w, h), 0)
-    md = ImageDraw.Draw(m)
-    for sgn in (-1, 1):
-        ex = cx + sgn * rw * 0.70
-        ey = cy - rh * 0.70
-        md.polygon([(ex - rw * 0.33, ey + rh * 0.42), (ex + sgn * rw * 0.07, ey - rh * 0.48),
-                    (ex + rw * 0.33, ey + rh * 0.42)], fill=255)
-    md.ellipse([cx - rw, cy - rh, cx + rw, cy + rh], fill=255)
-    if mood == "fluff":                      # 炸毛：沿轮廓向外长刺
-        for _ in range(280):
-            a = rng.uniform(0, 2 * math.pi)
-            rr = rng.uniform(0.92, 1.14)
-            px_ = cx + math.cos(a) * rw * rr
-            py_ = cy + math.sin(a) * rh * rr
-            L = rng.uniform(16, 50)
-            md.line([(px_, py_), (px_ + math.cos(a) * L, py_ + math.sin(a) * L)],
-                    fill=255, width=int(rng.uniform(5, 12)))
-    # 眼睛挖空
-    ew, eh = rw * 0.255, rh * 0.30
-    eye_pos = []
-    for sgn in (-1, 1):
-        ex = cx + sgn * rw * 0.40
-        ey = cy - rh * 0.08
-        eye_pos.append((ex, ey))
-        if mood == "sun":
-            md.ellipse([ex - ew, ey - eh * 0.17, ex + ew, ey + eh * 0.17], fill=0)
-        else:
-            md.ellipse([ex - ew, ey - eh, ex + ew, ey + eh], fill=0)
-    m = m.filter(ImageFilter.GaussianBlur(2.2))
-
-    sil = (32, 20, 13) if mood == "sun" else (9, 8, 12)
-    out = Image.composite(Image.new("RGB", (w, h), sil), base, m)
-
-    # ---- 逆光边缘光：剪影边缘一圈亮边（这是"照片感"的关键，
-    # 纯黑剪影会变成一个洞，有了边缘光才像背光拍摄）
-    inner = m.filter(ImageFilter.MinFilter(31))
-    edge = np.clip(np.asarray(m, np.float32) - np.asarray(inner, np.float32), 0, 255)
-    edge_im = Image.fromarray(edge.astype(np.uint8), "L").filter(ImageFilter.GaussianBlur(11))
-    rim_col = (255, 206, 140) if mood == "sun" else ((150, 200, 255) if mood == "stare" else (255, 168, 220))
-    out = Image.composite(Image.new("RGB", (w, h), rim_col), out, edge_im.point(lambda v: int(v * 0.80)))
-
-    # ---- 眼睛发光：先叠一层大范围光晕，再画不被模糊的亮核
-    glow = Image.new("RGB", (w, h), (0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    if mood == "sun":
-        ecol = (255, 214, 120)
-    elif mood == "stare":
-        ecol = (126, 232, 128)
-    else:
-        ecol = (255, 166, 202)          # 炸毛 / 结尾：粉紫，跟背景同调
-    for (ex, ey) in eye_pos:
-        if mood == "sun":
-            gd.ellipse([ex - ew * 2.2, ey - eh * 0.8, ex + ew * 2.2, ey + eh * 0.8], fill=ecol)
-        else:
-            gd.ellipse([ex - ew * 2.0, ey - eh * 1.9, ex + ew * 2.0, ey + eh * 1.9], fill=ecol)
-    glow = glow.filter(ImageFilter.GaussianBlur(20))
-    arr = np.asarray(out, np.float32) + np.asarray(glow, np.float32) * 0.19
-    out = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGB")
-
-    d2 = ImageDraw.Draw(out)
-    for (ex, ey) in eye_pos:
-        if mood == "sun":                    # 半闭：一条亮缝
-            d2.ellipse([ex - ew, ey - eh * 0.17, ex + ew, ey + eh * 0.17], fill=(255, 246, 196))
-        else:
-            d2.ellipse([ex - ew, ey - eh, ex + ew, ey + eh], fill=ecol)
-            d2.ellipse([ex - ew * 0.34, ey - eh * 0.94, ex + ew * 0.34, ey + eh * 0.94], fill=(6, 8, 7))
-            d2.ellipse([ex - ew * 0.64, ey - eh * 0.68, ex - ew * 0.14, ey - eh * 0.20], fill=(255, 255, 255))
-    _CAT[mood] = out
-    return out
+    name, mul, fx, fy = ASSETS.get(mood, ASSETS["fluff"])
+    p = os.path.join(ROOT, "assets", name)
+    src = Image.open(p).convert("RGB")
+    z = max(_CW / src.width, _CH / src.height)
+    im = src.resize((max(_CW, int(src.width * z + 0.5)), max(_CH, int(src.height * z + 0.5))),
+                    Image.LANCZOS)
+    ox = int(clip(fx * im.width - _CW / 2, 0, im.width - _CW))
+    oy = int(clip(fy * im.height - _CH / 2, 0, im.height - _CH))
+    im = im.crop((ox, oy, ox + _CW, oy + _CH))
+    a = np.asarray(im, np.float32) * np.array(mul, np.float32)
+    im = Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGB")
+    im = im.filter(ImageFilter.GaussianBlur(1.1))
+    _CAT[mood] = im
+    return im
 def shot_of(t):
     if t < 2.5:
         return "sun"
@@ -590,7 +501,7 @@ def render(t):
             st_sub = HZ(size=62, ext=8, ext_color="#12203F", outer=7, outer_color="#0E1630",
                         white=4, white_color="#FFFFFF",
                         grad=((0.0, "#FFFFFF"), (1.0, "#BFD8FF")), gloss=0.45)
-            draw_line(img, "这只猫有点东西", st_sub, W * 0.5, 760, t,
+            draw_line(img, "这只猫有点东西", st_sub, W * 0.5, 920, t,
                       [CUES["aside"] + i * 0.04 for i in range(7)], wig=1.2, bob=2.4)
         for (sx, sy, sr, s0) in [(160, 470, 34, 0.80), (930, 520, 26, 0.867),
                                  (880, 900, 40, 0.933), (200, 1010, 24, 1.0)]:
@@ -616,7 +527,7 @@ def render(t):
             if a is None:
                 continue
             s, dy, r = a
-            draw_char(img, "静", st_q2, W * 0.5 + (i - 2.5) * 92, 1480 + dy, s * 0.95, r)
+            draw_char(img, "静", st_q2, W * 0.5 + (i - 2.5) * 92, 1650 + dy, s * 0.95, r)
         for i, t0 in enumerate(CUES["sweat"]):
             draw_sweat(img, t, 880 + i * 70, 760 + i * 130, t0, 1.15 - i * 0.2)
 

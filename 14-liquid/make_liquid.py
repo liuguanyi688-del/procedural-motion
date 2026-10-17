@@ -1308,6 +1308,7 @@ if __name__ == "__main__":
     elif cmd == "all":
         cmd_all(int(sys.argv[2]) if len(sys.argv) > 2 else 3)
     elif cmd == "range":
-        cmd_all(int(sys.argv[5]) if len(sys.argv) > 5 else 3, int(sys.argv[2]), int(sys.argv[3]))
+        # argv = [script, 'range', lo, hi, workers] —— workers 在 [4]，不是 [5]
+        cmd_all(int(sys.argv[4]) if len(sys.argv) > 4 else 2, int(sys.argv[2]), int(sys.argv[3]))
     else:
         cmd_preview()

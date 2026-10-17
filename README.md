@@ -23,6 +23,7 @@
 | 12 | 复古 Synthwave Neon Drive | ![synthwave](12-synthwave/preview.gif) | 纯 numpy 光线投射 3D + 条纹落日 + 无限霓虹网格 + 磁带时间重映射 + VHS 色度延迟 | [README](12-synthwave/README.md) |
 | 13 | 像素风 Pixel Art | ![像素风](13-pixel-art/preview.gif) | 320×180 索引色 + 128 语义槽 × 6 时段 LUT + 调色板轮换 + 有序抖动 + CRT 扫描线 | [README](13-pixel-art/README.md) |
 | 14 | 液态流动 Liquid Motion | ![液态](14-liquid/preview.gif) | 全屏 SDF 平滑并集 + 厚度定色 + 球冠高度场法线 + 影棚反射 + 波前水淹 + mip bloom | [README](14-liquid/README.md) |
+| 15 | 综艺花字 Variety Captions | ![花字](15-variety-caption/preview.gif) | 单字五层叠描边（挤出×2/外描边/白描边/渐变/高光）+ 弹簧逐字入场 + 波浪抖动 + 竖屏构图 | [README](15-variety-caption/README.md) |
 
 ## 风格 Roadmap（目标 15 种，持续更新）
 
@@ -40,7 +41,7 @@
 - [x] 12 复古 Synthwave —— 霓虹网格 + 条纹落日 + 跑车冲向地平线，磁带故障与 VHS 色度延迟
 - [x] 13 像素风 Pixel Art —— 320×180 索引色，从清晨一路走到星夜，水波和星星只转色号不重画
 - [x] 14 液态流动 Liquid Motion —— 一滴水落下、弹跳、融合、跃起、决堤淹没全屏，退去时留下液态字标 drop
-- [ ] 15 待解锁
+- [x] 15 综艺花字 Variety Captions —— 竖屏 9:16，一个字的五层描边叠出综艺感，三只猫三种情绪
 
 ## 快速开始
 
@@ -106,6 +107,11 @@ ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slower -crf 18
 # 14 液态流动（全屏 SDF，约 4 秒/帧，2 并发约 20 分钟；瓶颈是内存不是核数）
 cd 14-liquid
 python make_liquid.py all 2
+ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slower -crf 18 -pix_fmt yuv420p -movflags +faststart output.mp4
+
+# 15 综艺花字（竖屏 1080x1920，约 3.3 秒/帧，2 并发约 16 分钟）
+cd 15-variety-caption
+python make_caption.py all 2
 ffmpeg -y -framerate 60 -i frames/f_%04d.png -c:v libx264 -preset slower -crf 18 -pix_fmt yuv420p -movflags +faststart output.mp4
 ```
 
